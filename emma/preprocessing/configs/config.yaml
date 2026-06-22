@@ -1,0 +1,169 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Experiment
+# ─────────────────────────────────────────────────────────────────────────────
+experiment:
+  name: "A_Adpb_Pa"
+  seed: 0
+  results_dir: "results"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Model
+# ─────────────────────────────────────────────────────────────────────────────
+model:
+  name: "spdvae"
+  prior: "ClassConditionalGaussian"   # "ClassConditionalGaussian" | "StdNormal"
+  learn_var: false   # whether ClassConditionalGaussianPrior learns per-class variance
+  latent_dim: 3
+  n_chans: 14          # 6 | 13 | 22 | 60 | 14 | 128
+  n_outputs: 2
+  subspace_dim1: 12    # 5 | 10 | 18 | 30 | 12 | 60
+  subspace_dim2: 8    # 4 |  8 | 12 | 15 |  8  | 30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Training
+# ─────────────────────────────────────────────────────────────────────────────
+training:
+  max_epochs: 50 #200
+  batch_size: 60
+  patience: 10 #15
+  lr: 0.01
+  optimizer: "riemannian_adam"        # "riemannian_adam" | "riemannian_sgd"
+  gk_riemann_increment: "hadamard"    # "hadamard" | "sqrt_norm"  (adam only)
+  reconstruction_loss: "squared_logdet"  # "squared_logdet" | "MSE"
+  beta_kl: 0.5
+  weight_ce: 1.0
+  weight_recon: 1.0
+
+  # ── Adversarial domain removal ────────────────────────────────────────────
+  # Set use_adversarial: false (or remove these keys entirely) to recover
+  # the original SPDVAE behaviour exactly.
+  use_adversarial: false
+ 
+  # λ_max for the DANN sigmoid ramp.
+  # The ramp starts at 0 and reaches weight_adv by the final epoch:
+  #   λ(epoch) = weight_adv × [ 2 / (1 + exp(−10 × epoch/max_epochs)) − 1 ]
+  #
+  # Recommended starting range: 0.05 – 0.2
+  # If classification accuracy drops sharply, reduce this value.
+  # If domain information leaks persist, increase it.
+  weight_adv: 0.2
+ 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Data  —  exactly one of `eeg`, `loso`, or `sim` should be active
+# ─────────────────────────────────────────────────────────────────────────────
+data:
+  # Which dataset type to use: "eeg" | "loso" | "sim"
+  dataset_type: "eeg"
+
+  # ── Regular multi-session EEG ─────────────────────────────────────────────
+  # IMPORTANT: data_dir must resolve to exactly the same absolute path string
+  # that was used when preprocessing was originally run (it is baked into the
+  # fold hash). Use a literal path or an env var that expands to that same string.
+  eeg:
+    data_dir: "C:/Users/andrieue/Desktop/Codes/spd_learn/emma_folder/utils/eeg_data/data"
+    processed_root: "C:/Users/andrieue/Desktop/Codes/spd_learn/emma_folder/utils/eeg_data/processed_data/DB_final"
+    db_prefix: "Schirrmeister2017" #"BNCI2014001"  | "Weibo2014" | "BNCI2015001" | "Zhou2016" | "Schirrmeister2017" | "BNCI2014002" "Cho2017"=> Change model dims accordingly
+    file_id: null           # null = load all sessions; set to e.g. 1 for a single file
+    k_folds: 5
+    eval_split_seeds: [0, 1, 2, 3]  # bootstrap seeds for evaluation splits
+    train_pct: 0.7
+    test_pct: 0.15
+    batch_single_dom: False
+    precond: True
+    precond_explVar: 0      # 0 = automatic dimensionality reduction
+    save_iZ: false  
+
+  # ── Leave-One-Subject-Out EEG ─────────────────────────────────────────────
+  # n_folds is auto-discovered from disk; no need to set it here.
+  loso:
+    data_dir: "/localdata/costamai/Apps/LibData/Isabella_session_1_only"
+    processed_root: "unused_loso_path"
+    db_prefix: "Weibo2014" # "BNCI2014001" |"Weibo2014" | "BNCI2015001" | "Zhou2016" | "Schirrmeister2017" | "BNCI2014002" => Change model dims accordingly
+    # ── Calibration-bootstrap settings (used by train_eval_multiseed_loso.py) ─
+    eval_split_seeds: [0, 1]  # seeds for reference set splits (eval only)
+    easy_hard_threshold: 0.70           # mean bacc threshold for easy/hard classification
+
+  # ── Simulated SPD data ────────────────────────────────────────────────────
+  sim:
+    processed_root: "sim_data/"
+    n_matrices: 200
+    n_dim: 6 # => Change model dims accordingly
+    eps: 0.8
+    sigma: 2
+    k_folds: 5
+    train_pct: 0.7
+    test_pct: 0.15
+    precond: False
+    precond_explVar: 1.0
+
+  # ── Subject filtering (applies to eeg and loso; ignored for sim) ──────────
+  # For LOSO: fold i is skipped entirely if subject i+1 is excluded;
+  #           that subject's data is also removed from all other folds' train/val.
+  # For EEG:  that domain's (pair (subject, session)) samples are removed from all splits in all folds.
+  filtering:
+    exclude_by_index: []      # 1-indexed subject IDs, e.g. [2, 5]
+    exclude_by_threshold:
+      method: "mdm"          # "tslr" | "mdm"
+      threshold: 0.0          # subjects with bacc <= threshold are excluded; 0.0 = keep all
+      k_folds_filter: 5     # inner CV folds for per-subject bacc; 1 = legacy
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────────────────────────────────────
+logging:
+  diagnostics_fold: 0   # only this fold logs gradients, loss curves, and topomaps
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Evaluation  (post-training, ad-hoc)
+# ─────────────────────────────────────────────────────────────────────────────
+evaluation:
+  exp_name: "Weibo2014__lr=0.01__β=0.5__λrec=1__opt=riemannian_adam__z=3__b1=30__b2=15__seed=0__id260223-100047"
+  #exp_name is automatically overwritten with created exp_name if called from train_eval_scripts/*
+  proj_type: "TSNE"
+
+  split_seed: 42                  # fixed split seed for single-seed eval runs
+                                  # overridden per iteration by train_eval_multiseed_loso.py
+
+  # ── Strategies to exclude from augmentation/denoising evaluation ──────────
+  # Saves significant compute time. Options: "B", "A", "D", "E"
+  # Example: ["B", "E"] skips unsupervised strategies (keeping F and A/D)
+  exclude_strategies: ["B", "D"]          # e.g. ["B", "E"] or ["B", "D", "E"]
+
+
+
+  # ── Data augmentation experiments ────────────────────────────────────────
+  augmentation:
+    low_data_pct: 0.30              # fraction of reference set for low-data train split
+    n_generated_multipliers: [5]  # N = multiplier × n_train_samples per class (F)
+    ab_n_multiplier: 5              # N multiplier for strategies A and B (single value)
+    alpha_values: [0.6]   # strategy A sweep (LOSO)
+    beta_values:  [0.6]   # strategy B sweep (LOSO)
+ 
+  # ── Data denoising experiments ────────────────────────────────────────────
+  denoising:
+    train_pct: 0.70                 # fraction of reference set for denoising train split
+    gamma_values: [0.6]   # strategies D and E sweep (LOSO)
+    test_label_method: "vae"        # "vae" | "mdm"  (for strategy D test-time labels)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Baseline classifiers
+#   filtering.exclude_by_threshold.method  still picks a single classifier
+#   for subject/domain filtering (tslr | mdm).
+#   classifier.baselines is used by evaluate_baselines.py and runs ALL entries.
+# ─────────────────────────────────────────────────────────────────────────────
+classifier:
+  baselines:
+    - type: "mdm"
+      metric: "riemann"       # riemann | logeuclid | euclid
+    - type: "tslr"
+      clf: "logistic"         # logistic regressor on tangent space
+    - type: "logreg"          # logistic regression on flattened upper-triangle
+    - type: "spdnet"
+      subspacedim: null       # null = no dimensionality reduction
+      max_epochs: 20
+      patience:   10
+      batch_size: 32
+      lr:         0.01
+      optimizer:  "riemannian_adam"
+      gk_riemann_increment: "hadamard"
